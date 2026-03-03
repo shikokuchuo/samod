@@ -32,6 +32,11 @@ pub(crate) enum DocToHubMsgPayload {
         msg: Broadcast,
     },
 
+    DocumentServed {
+        connection_id: ConnectionId,
+        document_id: DocumentId,
+    },
+
     Terminated,
 }
 

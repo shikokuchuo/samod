@@ -12,7 +12,7 @@ pub(crate) use hub_input::HubInput;
 mod hub_event_payload;
 pub(crate) use hub_event_payload::HubEventPayload;
 mod hub_results;
-pub use hub_results::HubResults;
+pub use hub_results::{DocumentServed, HubResults};
 pub mod io;
 mod state;
 pub(crate) use state::State;

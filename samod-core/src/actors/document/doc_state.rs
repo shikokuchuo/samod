@@ -327,26 +327,25 @@ impl DocState {
         &mut self,
         now: UnixTimestamp,
         peer_connections: &mut HashMap<ConnectionId, PeerDocConnection>,
-    ) -> HashMap<ConnectionId, Vec<SyncMessage>> {
+    ) -> (HashMap<ConnectionId, Vec<SyncMessage>>, Vec<ConnectionId>) {
         let mut result: HashMap<ConnectionId, Vec<SyncMessage>> = HashMap::new();
+        let mut first_served = Vec::new();
         for (conn_id, peer_conn) in peer_connections {
-            match &mut self.phase {
-                Phase::Loading { .. } | Phase::NotFound => {}
-                Phase::Requesting(request) => {
-                    if let Some(msg) = request.generate_message(now, &self.doc, peer_conn) {
-                        tracing::debug!(?conn_id, peer_id=?peer_conn.peer_id, ?msg, "sending sync msg");
-                        result.entry(*conn_id).or_default().push(msg);
-                    }
+            let was_unserved = !peer_conn.has_been_served();
+            let msg = match &mut self.phase {
+                Phase::Loading { .. } | Phase::NotFound => None,
+                Phase::Requesting(request) => request.generate_message(now, &self.doc, peer_conn),
+                Phase::Ready(ready) => ready.generate_sync_message(now, &mut self.doc, peer_conn),
+            };
+            if let Some(msg) = msg {
+                tracing::debug!(?conn_id, peer_id=?peer_conn.peer_id, ?msg, "sending sync msg");
+                if was_unserved {
+                    first_served.push(*conn_id);
                 }
-                Phase::Ready(ready) => {
-                    if let Some(msg) = ready.generate_sync_message(now, &mut self.doc, peer_conn) {
-                        tracing::debug!(?conn_id, peer_id=?peer_conn.peer_id, ?msg, "sending sync msg");
-                        result.entry(*conn_id).or_default().push(msg);
-                    }
-                }
+                result.entry(*conn_id).or_default().push(msg);
             }
         }
-        result
+        (result, first_served)
     }
 
     /// If the document is in a `NotFound` phase, re-request it from everyone we

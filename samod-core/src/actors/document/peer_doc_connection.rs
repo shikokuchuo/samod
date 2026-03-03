@@ -86,6 +86,10 @@ impl PeerDocConnection {
         }
     }
 
+    pub(super) fn has_been_served(&self) -> bool {
+        self.state.last_sent.is_some()
+    }
+
     pub(super) fn state(&self) -> &PeerDocState {
         &self.state
     }

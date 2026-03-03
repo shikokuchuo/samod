@@ -327,6 +327,7 @@ use samod_core::{
     io::{IoResult, IoTask},
     network::ConnectionEvent,
 };
+pub use samod_core::actors::hub::DocumentServed;
 use tracing::Instrument;
 
 mod actor_task;
@@ -453,8 +454,10 @@ impl Repo {
             peer_id,
             announce_policy,
             concurrency,
+            on_document_served,
         } = builder;
-        let task_setup = TaskSetup::new(storage.clone(), peer_id, concurrency).await;
+        let task_setup =
+            TaskSetup::new(storage.clone(), peer_id, concurrency, on_document_served).await;
         let inner = task_setup.inner.clone();
         task_setup.spawn_tasks(runtime, storage, announce_policy);
         Self { inner }
@@ -474,8 +477,10 @@ impl Repo {
             peer_id,
             announce_policy,
             concurrency,
+            on_document_served,
         } = builder;
-        let task_setup = TaskSetup::new(storage.clone(), peer_id, concurrency).await;
+        let task_setup =
+            TaskSetup::new(storage.clone(), peer_id, concurrency, on_document_served).await;
         let inner = task_setup.inner.clone();
         task_setup.spawn_tasks_local(runtime, storage, announce_policy);
         Self { inner }
@@ -766,6 +771,7 @@ struct Inner {
     waiting_for_connection: HashMap<PeerId, Vec<oneshot::Sender<Connection>>>,
     stop_waiters: Vec<oneshot::Sender<()>>,
     rng: rand::rngs::StdRng,
+    on_document_served: Option<Box<dyn Fn(DocumentServed) + Send + Sync>>,
 }
 
 impl Inner {
@@ -807,7 +813,14 @@ impl Inner {
             actor_messages,
             stopped,
             connection_events,
+            documents_served,
         } = self.hub.handle_event(&mut self.rng, now, event);
+
+        if let Some(ref cb) = self.on_document_served {
+            for served in documents_served {
+                cb(served);
+            }
+        }
 
         for spawn_args in spawn_actors {
             self.spawn_actor(spawn_args);
@@ -1032,6 +1045,7 @@ impl TaskSetup {
         storage: S,
         peer_id: Option<PeerId>,
         concurrency: ConcurrencyConfig,
+        on_document_served: Option<Box<dyn Fn(DocumentServed) + Send + Sync>>,
     ) -> TaskSetup {
         let mut rng = rand::rngs::StdRng::from_rng(&mut rand::rng());
         let peer_id = peer_id.unwrap_or_else(|| PeerId::new_with_rng(&mut rng));
@@ -1068,6 +1082,7 @@ impl TaskSetup {
             waiting_for_connection: HashMap::new(),
             stop_waiters: Vec::new(),
             rng: rand::rngs::StdRng::from_os_rng(),
+            on_document_served,
         }));
 
         TaskSetup {

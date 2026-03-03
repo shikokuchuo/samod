@@ -428,10 +428,18 @@ impl DocumentActor {
 
     fn generate_sync_messages(&mut self, now: UnixTimestamp, out: &mut DocActorResult) {
         let doc_id = self.document_id.clone();
-        for (conn_id, msgs) in self
+        let (messages, first_served) = self
             .doc_state
-            .generate_sync_messages(now, &mut self.peer_connections)
-        {
+            .generate_sync_messages(now, &mut self.peer_connections);
+
+        for conn_id in first_served {
+            out.send_message(DocToHubMsgPayload::DocumentServed {
+                connection_id: conn_id,
+                document_id: doc_id.clone(),
+            });
+        }
+
+        for (conn_id, msgs) in messages {
             for msg in msgs {
                 out.send_message(DocToHubMsgPayload::SendSyncMessage {
                     connection_id: conn_id,

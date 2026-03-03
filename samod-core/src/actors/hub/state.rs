@@ -411,6 +411,22 @@ impl State {
                         DocToHubMsgPayload::Broadcast { connections, msg } => {
                             self.broadcast(results, actor_id, connections, msg);
                         }
+                        DocToHubMsgPayload::DocumentServed {
+                            connection_id,
+                            document_id,
+                        } => {
+                            if let Some((_, peer_id)) =
+                                self.established_connection(connection_id)
+                            {
+                                results.documents_served.push(
+                                    super::hub_results::DocumentServed {
+                                        document_id,
+                                        connection_id,
+                                        peer_id,
+                                    },
+                                );
+                            }
+                        }
                         DocToHubMsgPayload::Terminated => {
                             tracing::debug!(?actor_id, "document actor terminated");
                             self.actors.remove(&actor_id);

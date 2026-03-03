@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    DocumentActorId,
+    ConnectionId, DocumentActorId, DocumentId, PeerId,
     actors::{
         HubToDocMsg,
         document::SpawnArgs,
@@ -13,6 +13,15 @@ use crate::{
 };
 
 use super::io::HubIoAction;
+
+/// Emitted when document sync data is first transmitted to a remote peer
+/// for a given (connection, document) pair.
+#[derive(Debug, Clone)]
+pub struct DocumentServed {
+    pub document_id: DocumentId,
+    pub connection_id: ConnectionId,
+    pub peer_id: PeerId,
+}
 
 /// Results returned from processing an event in the `Hub`
 ///
@@ -78,6 +87,12 @@ pub struct HubResults {
     /// - `ConnectionEstablished`: Connection ready for document sync
     /// - `ConnectionFailed`: Connection failed or was disconnected
     pub connection_events: Vec<ConnectionEvent>,
+
+    /// Documents served to remote peers for the first time on a given connection.
+    ///
+    /// Each entry represents the first time sync data for a document was
+    /// transmitted to a particular connection. Useful for audit logging.
+    pub documents_served: Vec<DocumentServed>,
 
     /// Indicates whether the hub is currently stopped.
     pub stopped: bool,

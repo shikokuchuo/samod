@@ -11,7 +11,7 @@ use samod_core::{
     actors::{
         DocumentActor, DocumentError,
         hub::{
-            DispatchedCommand, HubEvent,
+            DispatchedCommand, DocumentServed, HubEvent,
             io::{HubIoAction, HubIoResult},
         },
     },
@@ -38,6 +38,8 @@ pub struct SamodWrapper {
     document_actors: HashMap<DocumentActorId, DocActorRunner>,
     // Connection events captured during event processing
     connection_events: Vec<ConnectionEvent>,
+    // Document served events captured during event processing
+    documents_served: Vec<DocumentServed>,
     announce_policy: Box<dyn Fn(DocumentId, PeerId) -> bool>,
 }
 
@@ -78,6 +80,7 @@ impl SamodWrapper {
             outbox: HashMap::new(),
             document_actors: HashMap::new(),
             connection_events: Vec::new(),
+            documents_served: Vec::new(),
             announce_policy: Box::new(|_, _| true),
         }
     }
@@ -218,9 +221,10 @@ impl SamodWrapper {
             }
 
             // Capture connection events
-            for event in results.connection_events {
-                self.connection_events.push(event);
-            }
+            self.connection_events.extend(results.connection_events);
+
+            // Capture document served events
+            self.documents_served.extend(results.documents_served);
 
             // Handle IO tasks
             self.execute_io_tasks(results.new_tasks);
@@ -371,6 +375,16 @@ impl SamodWrapper {
     /// monitoring for new events.
     pub fn clear_connection_events(&mut self) {
         self.connection_events.clear();
+    }
+
+    /// Returns the document served events captured during event processing.
+    pub fn documents_served(&self) -> &[DocumentServed] {
+        &self.documents_served
+    }
+
+    /// Clears all captured document served events.
+    pub fn clear_documents_served(&mut self) {
+        self.documents_served.clear();
     }
 
     /// Returns a list of all connection IDs.

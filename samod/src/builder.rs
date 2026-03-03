@@ -1,7 +1,7 @@
 use samod_core::PeerId;
 
 use crate::{
-    Repo,
+    DocumentServed, Repo,
     announce_policy::{AlwaysAnnounce, AnnouncePolicy, LocalAnnouncePolicy},
     runtime::{LocalRuntimeHandle, RuntimeHandle},
     storage::{InMemoryStorage, LocalStorage, Storage},
@@ -39,6 +39,7 @@ pub struct RepoBuilder<S, R, A> {
     pub(crate) announce_policy: A,
     pub(crate) peer_id: Option<PeerId>,
     pub(crate) concurrency: ConcurrencyConfig,
+    pub(crate) on_document_served: Option<Box<dyn Fn(DocumentServed) + Send + Sync>>,
 }
 
 impl<S, R, A> RepoBuilder<S, R, A> {
@@ -49,6 +50,7 @@ impl<S, R, A> RepoBuilder<S, R, A> {
             runtime: self.runtime,
             announce_policy: self.announce_policy,
             concurrency: self.concurrency,
+            on_document_served: self.on_document_served,
         }
     }
 
@@ -59,6 +61,7 @@ impl<S, R, A> RepoBuilder<S, R, A> {
             storage: self.storage,
             announce_policy: self.announce_policy,
             concurrency: self.concurrency,
+            on_document_served: self.on_document_served,
         }
     }
 
@@ -74,6 +77,7 @@ impl<S, R, A> RepoBuilder<S, R, A> {
             storage: self.storage,
             announce_policy,
             concurrency: self.concurrency,
+            on_document_served: self.on_document_served,
         }
     }
 
@@ -83,6 +87,19 @@ impl<S, R, A> RepoBuilder<S, R, A> {
     /// documentation
     pub fn with_concurrency(mut self, concurrency: ConcurrencyConfig) -> Self {
         self.concurrency = concurrency;
+        self
+    }
+
+    /// Register a callback that fires when document sync data is first
+    /// transmitted to a remote peer for a given (connection, document) pair.
+    ///
+    /// The callback receives a [`DocumentServed`] value synchronously during
+    /// event processing and must not block.
+    pub fn with_on_document_served(
+        mut self,
+        callback: impl Fn(DocumentServed) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_document_served = Some(Box::new(callback));
         self
     }
 }
@@ -95,6 +112,7 @@ impl<R> RepoBuilder<InMemoryStorage, R, AlwaysAnnounce> {
             peer_id: None,
             announce_policy: AlwaysAnnounce,
             concurrency: ConcurrencyConfig::AsyncRuntime,
+            on_document_served: None,
         }
     }
 }
