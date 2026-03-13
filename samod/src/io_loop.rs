@@ -16,6 +16,7 @@ use url::Url;
 
 use crate::{
     ConnFinishedReason, Inner,
+    access_policy::LocalAccessPolicy,
     actor_task::ActorTask,
     announce_policy::LocalAnnouncePolicy,
     connection::ConnectionHandle,
@@ -64,12 +65,14 @@ struct StorageTaskComplete {
 /// Type alias for a shared, type-erased dialer.
 pub(crate) type DynDialer = Arc<dyn crate::Dialer>;
 
-#[tracing::instrument(skip(inner, storage, announce_policy, rx, dialers, observer))]
-pub(crate) async fn io_loop<S: LocalStorage, A: LocalAnnouncePolicy>(
+#[tracing::instrument(skip(inner, storage, announce_policy, access_policy, rx, dialers, observer))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn io_loop<S: LocalStorage, A: LocalAnnouncePolicy, Ac: LocalAccessPolicy>(
     local_peer_id: PeerId,
     inner: Arc<Mutex<Inner>>,
     storage: S,
     announce_policy: A,
+    access_policy: Ac,
     rx: UnboundedReceiver<IoLoopTask>,
     dialers: Arc<Mutex<std::collections::HashMap<DialerId, DynDialer>>>,
     observer: Option<Arc<dyn RepoObserver>>,
@@ -91,9 +94,10 @@ pub(crate) async fn io_loop<S: LocalStorage, A: LocalAnnouncePolicy>(
                         running_storage_tasks.push({
                             let storage = storage.clone();
                             let announce_policy = announce_policy.clone();
+                            let access_policy = access_policy.clone();
                             let observer = observer.clone();
                             async move {
-                                let result = dispatch_document_task(storage.clone(), announce_policy.clone(), doc_id.clone(), task, observer.as_deref()).await;
+                                let result = dispatch_document_task(storage.clone(), announce_policy.clone(), access_policy.clone(), doc_id.clone(), task, observer.as_deref()).await;
                                 StorageTaskComplete {
                                     result,
                                     actor_id,
@@ -154,9 +158,10 @@ pub(crate) async fn io_loop<S: LocalStorage, A: LocalAnnouncePolicy>(
     }
 }
 
-async fn dispatch_document_task<S: LocalStorage, A: LocalAnnouncePolicy>(
+async fn dispatch_document_task<S: LocalStorage, A: LocalAnnouncePolicy, Ac: LocalAccessPolicy>(
     storage: S,
     announce: A,
+    access: Ac,
     document_id: DocumentId,
     task: IoTask<DocumentIoTask>,
     obs: Option<&dyn RepoObserver>,
@@ -187,6 +192,12 @@ async fn dispatch_document_task<S: LocalStorage, A: LocalAnnouncePolicy>(
             task_id: task.task_id,
             payload: DocumentIoResult::CheckAnnouncePolicy(
                 announce.should_announce(document_id, peer_id).await,
+            ),
+        },
+        DocumentIoTask::CheckAccessPolicy { peer_id } => IoResult {
+            task_id: task.task_id,
+            payload: DocumentIoResult::CheckAccessPolicy(
+                access.should_allow(document_id, peer_id).await,
             ),
         },
     }

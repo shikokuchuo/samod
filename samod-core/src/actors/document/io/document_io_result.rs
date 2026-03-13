@@ -4,4 +4,5 @@ use crate::io::StorageResult;
 pub enum DocumentIoResult {
     Storage(StorageResult),
     CheckAnnouncePolicy(bool),
+    CheckAccessPolicy(bool),
 }

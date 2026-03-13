@@ -54,6 +54,7 @@ impl DocActorRunner {
         now: UnixTimestamp,
         storage: &mut Storage,
         announce_policy: &dyn Fn(DocumentId, PeerId) -> bool,
+        access_policy: &dyn Fn(DocumentId, PeerId) -> bool,
     ) {
         self.handle_completed_storage(now, storage);
         while let Some(event) = self.inbox.pop_front() {
@@ -78,6 +79,20 @@ impl DocActorRunner {
                         let io_result = IoResult {
                             task_id: task.task_id,
                             payload: DocumentIoResult::CheckAnnouncePolicy(announce_policy(
+                                self.doc_id.clone(),
+                                peer_id,
+                            )),
+                        };
+                        let actor_result = self
+                            .actor
+                            .handle_io_complete(now, io_result)
+                            .expect("failed to handle IO completion");
+                        self.enqueue_events(actor_result);
+                    }
+                    DocumentIoTask::CheckAccessPolicy { peer_id } => {
+                        let io_result = IoResult {
+                            task_id: task.task_id,
+                            payload: DocumentIoResult::CheckAccessPolicy(access_policy(
                                 self.doc_id.clone(),
                                 peer_id,
                             )),

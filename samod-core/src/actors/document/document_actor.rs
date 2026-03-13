@@ -8,9 +8,9 @@ use super::io::{DocumentIoResult, DocumentIoTask};
 use crate::DialerId;
 use crate::actors::document::load::{Load, LoadComplete};
 use crate::actors::document::on_disk_state::OnDiskState;
-use crate::actors::document::peer_doc_connection::{AnnouncePolicy, PeerDocConnection};
+use crate::actors::document::peer_doc_connection::{AccessPolicyState, AnnouncePolicy, PeerDocConnection};
 use crate::actors::document::{ActorInput, DocActorResult, DocumentStatus, WithDocResult};
-use crate::actors::messages::{Broadcast, DocDialerState, DocToHubMsgPayload};
+use crate::actors::messages::{Broadcast, DocDialerState, DocMessage, DocToHubMsgPayload, SyncMessage};
 use crate::actors::{DocToHubMsg, HubToDocMsg, RunState};
 use crate::io::{IoResult, IoTaskId};
 use crate::network::PeerDocState;
@@ -40,8 +40,10 @@ pub struct DocumentActor {
     /// Sync states for each connected peer
     peer_connections: HashMap<ConnectionId, PeerDocConnection>,
     on_disk_state: OnDiskState,
-    /// Ongoing policy check tasks
+    /// Ongoing announce policy check tasks
     check_policy_tasks: HashMap<IoTaskId, ConnectionId>,
+    /// Ongoing access policy check tasks
+    check_access_tasks: HashMap<IoTaskId, ConnectionId>,
     run_state: RunState,
     /// Current dialer states as reported by the hub. Used to delay NotFound
     /// transitions when there are dialers actively connecting.
@@ -87,6 +89,7 @@ impl DocumentActor {
             doc_state: state,
             load_state,
             check_policy_tasks: HashMap::new(),
+            check_access_tasks: HashMap::new(),
             on_disk_state: OnDiskState::new(),
             peer_connections: HashMap::new(),
             run_state: RunState::Running,
@@ -364,6 +367,52 @@ impl DocumentActor {
                             );
                         }
                     }
+                    DocumentIoResult::CheckAccessPolicy(allowed) => {
+                        let Some(conn_id) = self.check_access_tasks.remove(&io_result.task_id)
+                        else {
+                            panic!("unexpected access policy completion");
+                        };
+                        let policy = if allowed {
+                            AccessPolicyState::Allowed
+                        } else {
+                            AccessPolicyState::Denied
+                        };
+                        if let Some(peer_conn) = self.peer_connections.get_mut(&conn_id) {
+                            peer_conn.set_access_policy(policy);
+                            let pending = std::mem::take(&mut peer_conn.pending_access_messages);
+                            match policy {
+                                AccessPolicyState::Allowed => {
+                                    for msg in pending {
+                                        self.doc_state.handle_doc_message(
+                                            now,
+                                            out,
+                                            conn_id,
+                                            &mut self.peer_connections,
+                                            DocMessage::Sync(msg),
+                                            now,
+                                        );
+                                    }
+                                }
+                                AccessPolicyState::Denied => {
+                                    for msg in pending {
+                                        if matches!(msg, SyncMessage::Request { .. }) {
+                                            out.send_sync_message(
+                                                conn_id,
+                                                self.document_id.clone(),
+                                                SyncMessage::DocUnavailable,
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            tracing::warn!(
+                                ?conn_id,
+                                "access policy check for unknown connection ID",
+                            );
+                        }
+                    }
                 }
                 if let Some(LoadComplete {
                     snapshots,
@@ -403,7 +452,7 @@ impl DocumentActor {
             }
             return;
         }
-        self.enqueue_announce_policy_checks(out);
+        self.enqueue_policy_checks(out);
         self.generate_sync_messages(now, out);
         self.notify_of_new_peer_states(out);
         self.on_disk_state
@@ -433,7 +482,7 @@ impl DocumentActor {
             .map(|pc| pc.peer_id.clone())
     }
 
-    fn enqueue_announce_policy_checks(&mut self, out: &mut DocActorResult) {
+    fn enqueue_policy_checks(&mut self, out: &mut DocActorResult) {
         for peer_conn in self.peer_connections.values_mut() {
             if peer_conn.announce_policy() == AnnouncePolicy::Unknown {
                 tracing::trace!(
@@ -445,6 +494,19 @@ impl DocumentActor {
                 self.check_policy_tasks
                     .insert(task_id, peer_conn.connection_id);
                 peer_conn.set_announce_policy(AnnouncePolicy::Loading);
+            }
+            if peer_conn.access_policy() == AccessPolicyState::Unknown
+                && !peer_conn.pending_access_messages.is_empty()
+            {
+                tracing::trace!(
+                    peer_id=?peer_conn.peer_id,
+                    conn_id=?peer_conn.connection_id,
+                    "checking access policy"
+                );
+                let task_id = out.check_access_policy(peer_conn.peer_id.clone());
+                self.check_access_tasks
+                    .insert(task_id, peer_conn.connection_id);
+                peer_conn.set_access_policy(AccessPolicyState::Loading);
             }
         }
     }

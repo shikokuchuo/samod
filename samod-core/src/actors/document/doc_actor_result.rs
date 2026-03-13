@@ -126,6 +126,10 @@ impl DocActorResult {
         self.enqueue_task(DocumentIoTask::CheckAnnouncePolicy { peer_id })
     }
 
+    pub(crate) fn check_access_policy(&mut self, peer_id: PeerId) -> IoTaskId {
+        self.enqueue_task(DocumentIoTask::CheckAccessPolicy { peer_id })
+    }
+
     fn enqueue_task(&mut self, task: DocumentIoTask) -> IoTaskId {
         let io_task = IoTask::new(task);
         let task_id = io_task.task_id;
