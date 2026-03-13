@@ -20,7 +20,7 @@ use crate::{
 
 use super::{
     DocumentStatus,
-    peer_doc_connection::{AnnouncePolicy, PeerDocConnection},
+    peer_doc_connection::{AccessPolicyState, AnnouncePolicy, PeerDocConnection},
 };
 
 #[derive(Debug)]
@@ -248,6 +248,22 @@ impl DocState {
             tracing::warn!(?connection_id, "no sync state found for message");
             return;
         };
+
+        // Access policy guard — before mark_requested() and phase dispatch
+        match peer_conn.access_policy() {
+            AccessPolicyState::Denied => {
+                if matches!(msg, SyncMessage::Request { .. }) {
+                    out.send_sync_message(connection_id, self.document_id.clone(), SyncMessage::DocUnavailable);
+                }
+                return;
+            }
+            AccessPolicyState::Unknown | AccessPolicyState::Loading => {
+                peer_conn.pending_access_messages.push(msg);
+                return;
+            }
+            AccessPolicyState::Allowed => {}
+        }
+
         tracing::debug!(?connection_id, peer_id=?peer_conn.peer_id, ?msg, "received msg");
 
         if let SyncMessage::Request { .. } = msg {

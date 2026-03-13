@@ -5,7 +5,11 @@ use automerge::{
     sync::{self, SyncDoc},
 };
 
-use crate::{ConnectionId, PeerId, UnixTimestamp, network::PeerDocState};
+use crate::{
+    ConnectionId, PeerId, UnixTimestamp,
+    actors::messages::SyncMessage,
+    network::PeerDocState,
+};
 
 #[derive(Debug)]
 pub(super) struct PeerDocConnection {
@@ -21,6 +25,10 @@ pub(super) struct PeerDocConnection {
     state: PeerDocState,
     // Whether to announce this document to this peer
     announce_policy: AnnouncePolicy,
+    // Whether this peer is allowed to sync this document
+    access_policy: AccessPolicyState,
+    // Messages buffered while access policy check is pending
+    pub(super) pending_access_messages: Vec<SyncMessage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +37,14 @@ pub(crate) enum AnnouncePolicy {
     Loading,
     Announce,
     DontAnnounce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AccessPolicyState {
+    Unknown,
+    Loading,
+    Allowed,
+    Denied,
 }
 
 impl PeerDocConnection {
@@ -41,6 +57,8 @@ impl PeerDocConnection {
             state: PeerDocState::empty(),
             dirty: true,
             announce_policy: AnnouncePolicy::Unknown,
+            access_policy: AccessPolicyState::Unknown,
+            pending_access_messages: Vec::new(),
         }
     }
 
@@ -119,5 +137,16 @@ impl PeerDocConnection {
             self.dirty = true;
         }
         self.announce_policy = policy;
+    }
+
+    pub(super) fn access_policy(&self) -> AccessPolicyState {
+        self.access_policy
+    }
+
+    pub(super) fn set_access_policy(&mut self, policy: AccessPolicyState) {
+        if policy != self.access_policy {
+            self.dirty = true;
+        }
+        self.access_policy = policy;
     }
 }

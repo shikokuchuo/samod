@@ -39,6 +39,7 @@ pub struct SamodWrapper {
     // Connection events captured during event processing
     connection_events: Vec<ConnectionEvent>,
     announce_policy: Box<dyn Fn(DocumentId, PeerId) -> bool>,
+    access_policy: Box<dyn Fn(DocumentId, PeerId) -> bool>,
     /// A test listener ID used for incoming connections.
     test_listener_id: Option<ListenerId>,
 }
@@ -84,6 +85,7 @@ impl SamodWrapper {
             document_actors: HashMap::new(),
             connection_events: Vec::new(),
             announce_policy: Box::new(|_, _| true),
+            access_policy: Box::new(|_, _| true),
             test_listener_id: None,
         }
     }
@@ -272,7 +274,7 @@ impl SamodWrapper {
 
     pub fn handle_events(&mut self) {
         for (actor_id, runner) in &mut self.document_actors {
-            runner.handle_events(self.now, &mut self.storage, &self.announce_policy);
+            runner.handle_events(self.now, &mut self.storage, &self.announce_policy, &self.access_policy);
             self.inbox.extend(
                 runner
                     .take_outbox()
@@ -328,7 +330,7 @@ impl SamodWrapper {
 
             let mut stopped = Vec::new();
             for (actor_id, runner) in &mut self.document_actors {
-                runner.handle_events(self.now, &mut self.storage, &self.announce_policy);
+                runner.handle_events(self.now, &mut self.storage, &self.announce_policy, &self.access_policy);
                 self.inbox.extend(
                     runner
                         .take_outbox()
@@ -497,6 +499,10 @@ impl SamodWrapper {
 
     pub fn set_announce_policy(&mut self, policy: Box<dyn Fn(DocumentId, PeerId) -> bool>) {
         self.announce_policy = policy;
+    }
+
+    pub fn set_access_policy(&mut self, policy: Box<dyn Fn(DocumentId, PeerId) -> bool>) {
+        self.access_policy = policy;
     }
 
     pub fn broadcast(&mut self, actor_id: DocumentActorId, msg: Vec<u8>) {

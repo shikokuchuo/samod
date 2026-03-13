@@ -4,4 +4,5 @@ use crate::{PeerId, io::StorageTask};
 pub enum DocumentIoTask {
     Storage(StorageTask),
     CheckAnnouncePolicy { peer_id: PeerId },
+    CheckAccessPolicy { peer_id: PeerId },
 }

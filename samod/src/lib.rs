@@ -316,6 +316,7 @@ mod actor_task;
 use actor_task::ActorTask;
 mod actor_handle;
 use actor_handle::ActorHandle;
+mod access_policy;
 mod announce_policy;
 mod builder;
 pub use builder::RepoBuilder;
@@ -344,6 +345,7 @@ mod stopped;
 pub use stopped::Stopped;
 pub mod storage;
 pub mod transport;
+pub use crate::access_policy::{AccessPolicy, AllowAll, LocalAccessPolicy};
 pub use crate::announce_policy::{
     AlwaysAnnounce, AnnouncePolicy, LocalAnnouncePolicy, NeverAnnounce,
 };
@@ -445,20 +447,22 @@ impl Repo {
         R: runtime::RuntimeHandle + Clone + Send,
         S: Storage,
         A: AnnouncePolicy,
+        Ac: AccessPolicy,
     >(
-        builder: RepoBuilder<S, R, A>,
+        builder: RepoBuilder<S, R, A, Ac>,
     ) -> Self {
         let RepoBuilder {
             storage,
             runtime,
             peer_id,
             announce_policy,
+            access_policy,
             concurrency,
             observer,
         } = builder;
         let task_setup = TaskSetup::new(storage.clone(), peer_id, concurrency, observer).await;
         let inner = task_setup.inner.clone();
-        task_setup.spawn_tasks(runtime, storage, announce_policy);
+        task_setup.spawn_tasks(runtime, storage, announce_policy, access_policy);
         Self { inner }
     }
 
@@ -467,20 +471,22 @@ impl Repo {
         R: runtime::LocalRuntimeHandle + Clone + 'static,
         S: LocalStorage + 'a,
         A: LocalAnnouncePolicy + 'a,
+        Ac: LocalAccessPolicy + 'a,
     >(
-        builder: RepoBuilder<S, R, A>,
+        builder: RepoBuilder<S, R, A, Ac>,
     ) -> Self {
         let RepoBuilder {
             storage,
             runtime,
             peer_id,
             announce_policy,
+            access_policy,
             concurrency,
             observer,
         } = builder;
         let task_setup = TaskSetup::new(storage.clone(), peer_id, concurrency, observer).await;
         let inner = task_setup.inner.clone();
-        task_setup.spawn_tasks_local(runtime, storage, announce_policy);
+        task_setup.spawn_tasks_local(runtime, storage, announce_policy, access_policy);
         Self { inner }
     }
 
@@ -1300,11 +1306,13 @@ impl TaskSetup {
         R: LocalRuntimeHandle + Clone + 'static,
         S: LocalStorage,
         A: LocalAnnouncePolicy,
+        Ac: LocalAccessPolicy,
     >(
         self,
         runtime: R,
         storage: S,
         announce_policy: A,
+        access_policy: Ac,
     ) {
         runtime.spawn(
             io_loop::io_loop(
@@ -1312,6 +1320,7 @@ impl TaskSetup {
                 self.inner.clone(),
                 storage,
                 announce_policy,
+                access_policy,
                 self.rx_storage,
                 self.dialers.clone(),
                 self.observer.clone(),
@@ -1342,11 +1351,12 @@ impl TaskSetup {
         }
     }
 
-    fn spawn_tasks<R: RuntimeHandle + Clone + Send, S: Storage, A: AnnouncePolicy>(
+    fn spawn_tasks<R: RuntimeHandle + Clone + Send, S: Storage, A: AnnouncePolicy, Ac: AccessPolicy>(
         self,
         runtime: R,
         storage: S,
         announce_policy: A,
+        access_policy: Ac,
     ) {
         runtime.spawn(
             io_loop::io_loop(
@@ -1354,6 +1364,7 @@ impl TaskSetup {
                 self.inner.clone(),
                 storage,
                 announce_policy,
+                access_policy,
                 self.rx_storage,
                 self.dialers.clone(),
                 self.observer.clone(),
